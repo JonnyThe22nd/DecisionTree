@@ -2,12 +2,6 @@ using System;
 using UnityEngine;
 using UnityEngine.UI;
 
-/// <summary>
-/// Kleines Eingabe-Popup zum Benennen eines neuen Nodes (Root oder Kind).
-/// Wird zur Laufzeit als Kind einer bereits vorhandenen World-Space-Canvas
-/// instanziert (z.B. TreeMenuBuilder.content), damit es Position/Rotation/
-/// Skalierung automatisch von dort erbt -- kein eigenes Canvas nötig.
-/// </summary>
 public class NamingPopup : MonoBehaviour
 {
     [Tooltip("TMP_InputField, in das der Name eingegeben wird")]
@@ -34,7 +28,7 @@ public class NamingPopup : MonoBehaviour
 
         inputField.text = "";
         inputField.Select();
-        inputField.ActivateInputField(); // öffnet auf Quest automatisch die System-Tastatur
+        inputField.ActivateInputField();
     }
 
     void HandleConfirm()
@@ -48,8 +42,6 @@ public class NamingPopup : MonoBehaviour
 
     void OnDestroy()
     {
-        // Feuert IMMER, egal ob durch Bestätigen, Abbrechen oder externes Destroy() --
-        // so kann der Aufrufer zuverlässig seinen "Popup ist offen"-Zustand zurücksetzen.
         onClosed?.Invoke();
     }
 }

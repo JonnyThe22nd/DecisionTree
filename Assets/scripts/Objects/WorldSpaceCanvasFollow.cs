@@ -1,10 +1,5 @@
 using UnityEngine;
 
-/// <summary>
-/// Hält eine World-Space-Canvas an einem Zielobjekt (mit Offset) und dreht sie
-/// so, dass sie immer zur Kamera zeigt. An das Canvas-Root-Objekt hängen
-/// (also an dasselbe Objekt wie TreeMenuBuilder.canvasRoot).
-/// </summary>
 public class WorldSpaceCanvasFollow : MonoBehaviour
 {
     public Transform target;
@@ -23,9 +18,6 @@ public class WorldSpaceCanvasFollow : MonoBehaviour
     {
         if (target == null) return;
 
-        // Position folgt dem Objekt (wichtig falls es sich bewegt), Rotation
-        // bleibt standardmäßig unangetastet -- die Canvas "klebt" am Objekt,
-        // statt sich nach dem Spieler auszurichten.
         transform.position = target.position + offset;
 
         if (faceCamera && Camera.main != null)

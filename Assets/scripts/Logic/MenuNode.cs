@@ -3,21 +3,15 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
 
-/// <summary>
-/// Eine einzelne Quelle/Annotation an einem Node. Titel = Kurzbezeichnung
-/// für die Liste, Content = der eigentliche Text/Link/Zitat/Verweis.
-/// </summary>
 [System.Serializable]
 public class SourceEntry
 {
     public string Title;
-    public string Content;
+    public string FilePath;
+
+    public bool IsImage => SourceLibrary.IsImage(FilePath);
 }
 
-/// <summary>
-/// Reiner Datencontainer für einen Menü-Knoten. Kennt nichts von Visualisierung,
-/// außer der Referenz auf sein instanziertes UI-Element (wird vom Builder gesetzt).
-/// </summary>
 public class MenuNode
 {
     public string Label;
@@ -25,19 +19,14 @@ public class MenuNode
     public List<MenuNode> Children = new List<MenuNode>();
     public UnityAction OnSelect;
 
-    // Quellen/Annotationen, die zu diesem Node gehören -- unabhängig von Kindern.
     public List<SourceEntry> Sources = new List<SourceEntry>();
 
-    // Wird zur Laufzeit vom TreeMenuBuilder befüllt (das Button-UI-Element)
     public RectTransform VisualInstance;
 
-    // Verbindungslinie zum Parent, dargestellt als gestrecktes UI-Image
     public RectTransform ConnectionToParent;
 
-    // Wird vom Layout-Algorithmus berechnet (in Canvas-lokalen Einheiten, z.B. Pixel)
     public float LayoutX;
 
-    // Für Expand/Collapse (progressive disclosure in VR wichtig!)
     public bool IsExpanded = true;
 
     public MenuNode(string label, UnityAction onSelect = null)
@@ -53,7 +42,6 @@ public class MenuNode
         return child;
     }
 
-    // Praktisch für den prozeduralen Aufbau: gibt den neu erzeugten Node zurück
     public MenuNode AddChild(string label, UnityAction onSelect = null)
     {
         var node = new MenuNode(label, onSelect);
@@ -62,8 +50,8 @@ public class MenuNode
 
     public bool IsLeaf => Children.Count == 0;
 
-    // 0 = Root, 1 = Kind, 2 = Enkelkind usw. Wird für die Begrenzung
-    // "nur bis zur zweiten Ebene können Kinder hinzugefügt werden" genutzt.
+    public bool IsRoot => Parent == null;
+
     public int Depth
     {
         get

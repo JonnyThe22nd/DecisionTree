@@ -12,6 +12,7 @@ GameObject:
   - component: {fileID: 1207275249827309327}
   - component: {fileID: 853490948171750517}
   - component: {fileID: 5243111971905858311}
+  - component: {fileID: 3159321574579560036}
   m_Layer: 5
   m_Name: SoucreButton
   m_TagString: Untagged
@@ -121,6 +122,22 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &3159321574579560036
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 176094298406091047}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 53c9d7e4ceba56d40a850a0fbbea7158, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UIHoverEffect
+  hoverScale: 1.3
+  hoverColor: {r: 1, g: 0.8, b: 0.25, a: 1}
+  targetGraphic: {fileID: 0}
+  animationSpeed: 14
 --- !u!1 &7039786875875629802
 GameObject:
   m_ObjectHideFlags: 0

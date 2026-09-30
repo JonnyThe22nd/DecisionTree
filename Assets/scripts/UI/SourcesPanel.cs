@@ -1,40 +1,31 @@
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
-/// <summary>
-/// Zeigt die Quellenliste eines Nodes an und erlaubt das Hinzufügen neuer Quellen.
-/// Wird von TreeMenuBuilder EINMALIG instanziert und für jeden Node wiederverwendet
-/// (Open(node) baut die Liste jedes Mal neu auf). Klick auf einen Listeneintrag
-/// zeigt dessen vollen Inhalt im Detail-Textfeld an.
-/// </summary>
 public class SourcesPanel : MonoBehaviour
 {
+    [Tooltip("Optional -- zeigt den Namen der Entscheidung, deren Quellen gelistet sind")]
+    public TMPro.TextMeshProUGUI titleText;
+
     [Header("Liste")]
-    [Tooltip("Container mit z.B. einer Vertical Layout Group, in den die Einträge kommen")]
+    [Tooltip("Content-Objekt der ScrollView (mit Vertical Layout Group), in das die Einträge kommen")]
     public RectTransform listContainer;
     [Tooltip("Button mit TextMeshProUGUI-Kind, eine Zeile pro Quelle")]
     public Button sourceListItemPrefab;
+    [Tooltip("Optional -- wird angezeigt, solange die Entscheidung keine Quellen hat")]
+    public TMPro.TextMeshProUGUI emptyHint;
 
-    [Header("Detailansicht")]
-    [Tooltip("Zeigt den vollen Content der angeklickten Quelle")]
-    public TMPro.TextMeshProUGUI detailText;
-
-    [Header("Hinzufügen")]
-    public Button addSourceButton;
-    public SourceEntryPopup sourceEntryPopupPrefab;
-    [Tooltip("Wo das Eingabe-Popup instanziert wird, z.B. TreeMenuBuilder.content")]
-    public RectTransform popupParent;
+    [Header("Anzeige")]
+    public SourceViewer viewer;
 
     [Header("Schließen")]
     public Button closeButton;
 
     MenuNode node;
-    bool addPopupOpen;
+
+    public MenuNode CurrentNode => node;
 
     void Awake()
     {
-        if (addSourceButton != null) addSourceButton.onClick.AddListener(OnAddSourceClicked);
         if (closeButton != null) closeButton.onClick.AddListener(Close);
     }
 
@@ -42,23 +33,26 @@ public class SourcesPanel : MonoBehaviour
     {
         node = targetNode;
         gameObject.SetActive(true);
+        if (viewer != null) viewer.Hide();
         RefreshList();
     }
 
     public void Close()
     {
+        if (viewer != null) viewer.Hide();
         gameObject.SetActive(false);
         node = null;
     }
 
-    void RefreshList()
+    public void RefreshList()
     {
         foreach (Transform child in listContainer)
             Destroy(child.gameObject);
 
-        if (detailText != null) detailText.text = "";
-
         if (node == null) return;
+
+        if (titleText != null) titleText.text = "Quellen: " + node.Label;
+        if (emptyHint != null) emptyHint.gameObject.SetActive(node.Sources.Count == 0);
 
         foreach (var source in node.Sources)
         {
@@ -66,28 +60,11 @@ public class SourcesPanel : MonoBehaviour
             var label = item.GetComponentInChildren<TMPro.TextMeshProUGUI>();
             if (label != null) label.text = source.Title;
 
-            var captured = source; // lokale Kopie für die Closure
+            var captured = source;
             item.onClick.AddListener(() =>
             {
-                if (detailText != null) detailText.text = captured.Content;
+                if (viewer != null) viewer.Show(captured);
             });
         }
-    }
-
-    void OnAddSourceClicked()
-    {
-        if (addPopupOpen || sourceEntryPopupPrefab == null || node == null) return;
-
-        addPopupOpen = true;
-        var parent = popupParent != null ? popupParent : (RectTransform)transform;
-        var popup = Instantiate(sourceEntryPopupPrefab, parent);
-        popup.Init(
-            (title, content) =>
-            {
-                node.Sources.Add(new SourceEntry { Title = title, Content = content });
-                RefreshList();
-            },
-            () => addPopupOpen = false
-        );
     }
 }

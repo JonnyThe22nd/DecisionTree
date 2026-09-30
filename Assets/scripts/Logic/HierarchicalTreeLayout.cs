@@ -1,9 +1,6 @@
 using UnityEngine;
 
-/// <summary>
-/// Klassisches Organigramm-Layout, arbeitet in Canvas-lokalen Einheiten (anchoredPosition).
-/// Root oben, Kinder darunter, horizontal verteilt. Eltern zentrieren sich über ihren Kindern.
-/// </summary>
+[System.Serializable]
 public class HierarchicalTreeLayout
 {
     [Tooltip("Horizontaler Abstand zwischen benachbarten Blatt-Nodes, in Canvas-Einheiten (z.B. Pixel)")]
@@ -19,7 +16,6 @@ public class HierarchicalTreeLayout
         nextX = 0f;
         AssignX(root);
 
-        // Baum um den Mittelpunkt zentrieren, statt bei X=0 zu starten
         float rootOffset = root.LayoutX;
         AssignPosition(root, origin, 0, rootOffset);
     }

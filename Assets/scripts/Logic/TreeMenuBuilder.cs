@@ -1,15 +1,15 @@
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 
-/// <summary>
-/// Baut und verwaltet einen Organigramm-Menübaum als World-Space-Canvas-UI,
-/// inklusive Laufzeit-Erstellung: solange kein Baum existiert, kann über
-/// 'createPromptButton' + Namens-Popup ein Root-Node erstellt werden. Danach
-/// bekommt JEDER Node (unbegrenzte Tiefe) einen Plus-Button für weitere Kinder
-/// sowie einen Quellen-Button, über den Quellen/Annotationen hinzugefügt und
-/// eingesehen werden können.
-/// </summary>
+public enum TreeDetailLevel
+{
+    Pin,
+    Name,
+    Full
+}
+
 public class TreeMenuBuilder : MonoBehaviour
 {
     [Header("Canvas")]
@@ -19,25 +19,39 @@ public class TreeMenuBuilder : MonoBehaviour
              "als Kind von canvasRoot erzeugt, falls hier nichts zugewiesen ist.")]
     public RectTransform content;
 
+    [Tooltip("Container für Popups und das Quellen-Panel. Liegt über dem Baum und wird " +
+             "NICHT mitskaliert, damit Popups auch bei großen Bäumen lesbar bleiben. Wird " +
+             "automatisch als Kind von canvasRoot erzeugt, falls hier nichts zugewiesen ist.")]
+    public RectTransform overlay;
+
     [Header("Prefabs")]
     [Tooltip("WICHTIG: anchorMin/anchorMax NICHT stretchen (z.B. (0.5,0.5))")]
     public Button nodePrefab;
     [Tooltip("anchorMin = anchorMax = (0.5, 0.5), Pivot = (0, 0.5)")]
     public Image linePrefab;
-    [Tooltip("Kleiner '+'-Button, wird an JEDEN Node angehängt (keine Tiefenbegrenzung mehr)")]
+    [Tooltip("Kleiner '+'-Button, wird an JEDEN Node angehängt (keine Tiefenbegrenzung)")]
     public Button plusButtonPrefab;
-    [Tooltip("Kleiner 'Quellen'-Button, wird ebenfalls an JEDEN Node angehängt")]
-    public Button sourcesButtonPrefab;
+    [Tooltip("Kleiner 'Quelle hinzufügen'-Button, wird an jede Entscheidung angehängt (nicht an die Top-Node)")]
+    public Button addSourceButtonPrefab;
     [Tooltip("Panel mit TMP_InputField + Bestätigen-Button zum Benennen neuer Nodes")]
     public NamingPopup namingPopupPrefab;
-    [Tooltip("Panel zum Anzeigen/Hinzufügen von Quellen an einem Node. Wird EINMALIG " +
-             "instanziert (als Kind von content) und für jeden Node wiederverwendet.")]
+    [Tooltip("Popup mit der Dateiliste des Quellen-Ordners")]
+    public SourcePickerPopup sourcePickerPrefab;
+    [Tooltip("Panel mit der Quellenliste einer Entscheidung. Wird EINMALIG instanziert " +
+             "(als Kind von overlay) und für jeden Node wiederverwendet.")]
     public SourcesPanel sourcesPanelPrefab;
 
     [Header("Erstellung")]
     [Tooltip("Button (z.B. '+ Baum erstellen'), der sichtbar wird, solange noch kein " +
              "Baum existiert. Wird von ObjectTreeAttachment ein-/ausgeblendet.")]
     public GameObject createPromptButton;
+
+    [Header("Fern-Ansicht")]
+    [Tooltip("Markierung, die aus großer Entfernung statt des Baums gezeigt wird")]
+    public RectTransform pinView;
+    [Tooltip("Schild mit dem Namen des Baums für mittlere Entfernung")]
+    public RectTransform nameView;
+    public TMPro.TextMeshProUGUI nameLabel;
 
     [Header("Layout")]
     public HierarchicalTreeLayout layout = new HierarchicalTreeLayout();
@@ -49,17 +63,24 @@ public class TreeMenuBuilder : MonoBehaviour
 
     [Header("Verhalten")]
     public float lineThickness = 4f;
+    [Tooltip("Deckkraft des Baums, solange ein Fenster offen ist und der Baum gesperrt ist")]
+    [Range(0f, 1f)]
+    public float blockedAlpha = 0.35f;
 
     MenuNode root;
     readonly List<MenuNode> allNodes = new List<MenuNode>();
-    bool rootPopupOpen = false;
+    bool popupOpen = false;
     SourcesPanel sourcesPanelInstance;
+
+    CanvasGroup contentGroup;
 
     public bool HasTree => root != null;
 
+    public bool IsCreatePromptVisible => createPromptButton != null && createPromptButton.activeSelf;
+
     void Awake()
     {
-        EnsureContent();
+        EnsureContainers();
 
         if (createPromptButton != null)
         {
@@ -71,44 +92,100 @@ public class TreeMenuBuilder : MonoBehaviour
 
         if (sourcesPanelPrefab != null)
         {
-            sourcesPanelInstance = Instantiate(sourcesPanelPrefab, content);
+            sourcesPanelInstance = Instantiate(sourcesPanelPrefab, overlay);
             sourcesPanelInstance.gameObject.SetActive(false);
+        }
+
+        SetDetailLevel(TreeDetailLevel.Full);
+    }
+
+    void EnsureContainers()
+    {
+        if (content == null)
+        {
+            var go = new GameObject("TreeContent", typeof(RectTransform));
+            var rt = go.GetComponent<RectTransform>();
+            rt.SetParent(canvasRoot, false);
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = Vector2.zero;
+            content = rt;
+        }
+
+        if (overlay == null)
+        {
+            var go = new GameObject("Overlay", typeof(RectTransform));
+            var rt = go.GetComponent<RectTransform>();
+            rt.SetParent(canvasRoot, false);
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = rt.offsetMax = Vector2.zero;
+            overlay = rt;
+        }
+
+        overlay.SetAsLastSibling();
+
+        if (contentGroup == null)
+        {
+            contentGroup = content.GetComponent<CanvasGroup>();
+            if (contentGroup == null) contentGroup = content.gameObject.AddComponent<CanvasGroup>();
         }
     }
 
-    void EnsureContent()
-    {
-        if (content != null) return;
+    public bool IsWindowOpen =>
+        popupOpen || (sourcesPanelInstance != null && sourcesPanelInstance.gameObject.activeSelf);
 
-        var go = new GameObject("TreeContent", typeof(RectTransform));
-        var rt = go.GetComponent<RectTransform>();
-        rt.SetParent(canvasRoot, false);
-        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
-        rt.pivot = new Vector2(0.5f, 0.5f);
-        rt.anchoredPosition = Vector2.zero;
-        content = rt;
+    void Update()
+    {
+        bool blocked = IsWindowOpen;
+        contentGroup.interactable = !blocked;
+        contentGroup.blocksRaycasts = !blocked;
+        contentGroup.alpha = blocked ? blockedAlpha : 1f;
     }
 
-    // Wird von ObjectTreeAttachment aufgerufen, um den Create-Button je nach
-    // Hover/Nähe ein- oder auszublenden. Tut nichts mehr, sobald ein Baum existiert.
     public void SetCreatePromptVisible(bool visible)
     {
-        if (createPromptButton != null && !HasTree && !rootPopupOpen)
+        if (createPromptButton != null && !HasTree && !popupOpen)
             createPromptButton.SetActive(visible);
+    }
+
+    public void SetDetailLevel(TreeDetailLevel level, float farScale = 1f)
+    {
+        if (!HasTree) level = TreeDetailLevel.Full;
+
+        SetActiveIfChanged(content, level == TreeDetailLevel.Full);
+        SetActiveIfChanged(overlay, level == TreeDetailLevel.Full);
+        bool showName = HasTree && level == TreeDetailLevel.Name;
+        if (nameView != null && showName && !nameView.gameObject.activeSelf)
+        {
+            nameView.gameObject.SetActive(true);
+            LayoutRebuilder.ForceRebuildLayoutImmediate(nameView);
+        }
+        SetActiveIfChanged(nameView, showName);
+        SetActiveIfChanged(pinView, HasTree && level == TreeDetailLevel.Pin);
+
+        if (nameView != null) nameView.localScale = Vector3.one * farScale;
+        if (pinView != null) pinView.localScale = Vector3.one * farScale;
+    }
+
+    static void SetActiveIfChanged(RectTransform target, bool active)
+    {
+        if (target != null && target.gameObject.activeSelf != active)
+            target.gameObject.SetActive(active);
     }
 
     public void PromptCreateRoot()
     {
-        if (HasTree || namingPopupPrefab == null || rootPopupOpen) return;
+        if (HasTree || namingPopupPrefab == null || popupOpen) return;
 
-        rootPopupOpen = true;
+        popupOpen = true;
         if (createPromptButton != null) createPromptButton.SetActive(false);
 
-        var popup = Instantiate(namingPopupPrefab, content);
+        var popup = Instantiate(namingPopupPrefab, overlay);
         popup.Init(
             label => CreateRoot(label),
             "Name des Baums...",
-            () => rootPopupOpen = false // läuft IMMER beim Schließen, egal ob bestätigt oder abgebrochen
+            () => popupOpen = false
         );
     }
 
@@ -122,29 +199,59 @@ public class TreeMenuBuilder : MonoBehaviour
 
     public void RequestAddChild(MenuNode parent)
     {
-        if (namingPopupPrefab == null) return;
+        if (namingPopupPrefab == null || popupOpen) return;
 
-        var popup = Instantiate(namingPopupPrefab, content);
-        popup.Init(label =>
-        {
-            var child = parent.AddChild(label);
-            CollectAndInstantiate(child);
-            Relayout();
-        }, "Name...");
+        popupOpen = true;
+        var popup = Instantiate(namingPopupPrefab, overlay);
+        popup.Init(
+            label => AddChild(parent, label),
+            "Name der Entscheidung...",
+            () => popupOpen = false
+        );
+    }
+
+    public MenuNode AddChild(MenuNode parent, string label)
+    {
+        var child = parent.AddChild(label);
+        CollectAndInstantiate(child);
+        Relayout();
+        return child;
+    }
+
+    public void RequestAddSource(MenuNode node)
+    {
+        if (sourcePickerPrefab == null || popupOpen) return;
+
+        popupOpen = true;
+        var popup = Instantiate(sourcePickerPrefab, overlay);
+        popup.Init(
+            path => AddSource(node, path),
+            () => popupOpen = false
+        );
+    }
+
+    public void AddSource(MenuNode node, string filePath)
+    {
+        if (node.Sources.Exists(s => s.FilePath == filePath)) return;
+
+        node.Sources.Add(new SourceEntry { Title = Path.GetFileName(filePath), FilePath = filePath });
+
+        if (sourcesPanelInstance != null && sourcesPanelInstance.CurrentNode == node)
+            sourcesPanelInstance.RefreshList();
     }
 
     public void RequestOpenSources(MenuNode node)
     {
-        if (sourcesPanelInstance == null) return;
-        sourcesPanelInstance.transform.SetAsLastSibling(); // immer ganz oben rendern
+        if (sourcesPanelInstance == null || popupOpen) return;
         sourcesPanelInstance.Open(node);
     }
 
     public void Build(MenuNode treeRoot)
     {
-        EnsureContent();
+        EnsureContainers();
         Clear();
         root = treeRoot;
+        if (nameLabel != null) nameLabel.text = root.Label;
         CollectAndInstantiate(root);
         Relayout();
     }
@@ -170,9 +277,6 @@ public class TreeMenuBuilder : MonoBehaviour
 
         btn.onClick.AddListener(() => OnNodeSelected(node));
 
-        // Plus-Button an JEDEM Node -- keine Tiefenbegrenzung mehr, der Baum darf
-        // beliebig tief werden. Als Kind des Node-Buttons, damit er automatisch
-        // mitwandert/mitskaliert -- kein separates Layout nötig.
         if (plusButtonPrefab != null)
         {
             Button plus = Instantiate(plusButtonPrefab, node.VisualInstance);
@@ -183,16 +287,14 @@ public class TreeMenuBuilder : MonoBehaviour
             plus.onClick.AddListener(() => RequestAddChild(node));
         }
 
-        // Quellen-Button ebenfalls an JEDEM Node -- unabhängig vom Plus-Button,
-        // unter diesem platziert, damit sie sich nicht überlappen.
-        if (sourcesButtonPrefab != null)
+        if (addSourceButtonPrefab != null && !node.IsRoot)
         {
-            Button sourcesBtn = Instantiate(sourcesButtonPrefab, node.VisualInstance);
-            var sourcesRT = sourcesBtn.GetComponent<RectTransform>();
-            sourcesRT.anchorMin = sourcesRT.anchorMax = new Vector2(1f, 0f);
-            sourcesRT.pivot = new Vector2(0f, 0f);
-            sourcesRT.anchoredPosition = new Vector2(10f, 0f);
-            sourcesBtn.onClick.AddListener(() => RequestOpenSources(node));
+            Button addSource = Instantiate(addSourceButtonPrefab, node.VisualInstance);
+            var addSourceRT = addSource.GetComponent<RectTransform>();
+            addSourceRT.anchorMin = addSourceRT.anchorMax = new Vector2(1f, 0f);
+            addSourceRT.pivot = new Vector2(0f, 0f);
+            addSourceRT.anchoredPosition = new Vector2(10f, 0f);
+            addSource.onClick.AddListener(() => RequestAddSource(node));
         }
 
         if (node.Parent != null)
@@ -209,6 +311,8 @@ public class TreeMenuBuilder : MonoBehaviour
     void OnNodeSelected(MenuNode node)
     {
         node.OnSelect?.Invoke();
+
+        if (!node.IsRoot) RequestOpenSources(node);
     }
 
     void Relayout()
