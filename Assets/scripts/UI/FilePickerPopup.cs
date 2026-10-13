@@ -1,36 +1,34 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 
-public class SourcePickerPopup : MonoBehaviour
+public class FilePickerPopup : MonoBehaviour
 {
-    [Tooltip("Content-Objekt der ScrollView (mit Vertical Layout Group), in das die Einträge kommen")]
+    public TMPro.TextMeshProUGUI titleText;
     public RectTransform listContainer;
-    [Tooltip("Button mit TextMeshProUGUI-Kind, eine Zeile pro Datei")]
     public Button listItemPrefab;
-    [Tooltip("Optional -- wird angezeigt, wenn der Quellen-Ordner leer ist (nennt den Ordnerpfad)")]
     public TMPro.TextMeshProUGUI emptyHint;
-    [Tooltip("Optional -- schließt das Popup ohne Auswahl")]
     public Button cancelButton;
 
     Action<string> onPicked;
     Action onClosed;
 
-    public void Init(Action<string> onPickedCallback, Action onClosedCallback = null)
+    public void Init(IList<string> files, string title, string emptyMessage, Action<string> onPickedCallback, Action onClosedCallback = null)
     {
         onPicked = onPickedCallback;
         onClosed = onClosedCallback;
 
+        if (titleText != null) titleText.text = title;
+
         if (cancelButton != null)
             cancelButton.onClick.AddListener(() => Destroy(gameObject));
-
-        var files = SourceLibrary.ListFiles();
 
         if (emptyHint != null)
         {
             emptyHint.gameObject.SetActive(files.Count == 0);
-            emptyHint.text = "Keine Quellen gefunden. Text- oder Bilddateien hier ablegen:\n" + SourceLibrary.FolderPath;
+            emptyHint.text = emptyMessage;
         }
 
         foreach (var file in files)

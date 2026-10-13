@@ -1,10 +1,11 @@
+using System.IO;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.XR.Interaction.Toolkit.UI;
 
-public static class DecisionTreeSetup
+public static partial class DecisionTreeSetup
 {
     const string PrefabFolder = "Assets/prefabs";
 
@@ -27,10 +28,15 @@ public static class DecisionTreeSetup
 
         var listItem = LoadPrefabComponent<Button>("SourceSelectButton");
 
+        var modelButton = BuildModelButton();
+        var resetViewButton = BuildResetViewButton();
+        var anchorSprite = CreateAnchorSprite();
         var namingPopup = BuildNamingPopup();
-        var sourcePicker = BuildSourcePicker(listItem);
+        var decisionPopup = BuildDecisionPopup();
+        var sourcePicker = BuildFilePicker("SourcePickerPopup", "Quelle auswählen", listItem);
+        var modelPicker = BuildFilePicker("ModelPickerPopup", "3D-Modell auswählen", listItem);
         var sourcesPanel = BuildSourcesPanel(listItem);
-        BuildTreeCanvas(namingPopup, sourcePicker, sourcesPanel);
+        BuildTreeCanvas(modelButton, resetViewButton, anchorSprite, namingPopup, decisionPopup, sourcePicker, modelPicker, sourcesPanel);
 
         AssetDatabase.SaveAssets();
         Debug.Log("DecisionTreeSetup: Prefabs in " + PrefabFolder + " erzeugt.");
@@ -75,6 +81,8 @@ public static class DecisionTreeSetup
         }
 
         var root = PrefabUtility.LoadPrefabContents(path);
+        var rootButton = root.GetComponent<Button>();
+        if (rootButton != null) rootButton.transition = Selectable.Transition.None;
         var effect = root.GetComponent<UIHoverEffect>();
         if (effect == null) effect = root.AddComponent<UIHoverEffect>();
         effect.hoverScale = hoverScale;
@@ -88,6 +96,105 @@ public static class DecisionTreeSetup
         var asset = PrefabUtility.SaveAsPrefabAsset(go, $"{PrefabFolder}/{go.name}.prefab");
         Object.DestroyImmediate(go);
         return asset.GetComponent<T>();
+    }
+
+    static Button BuildModelButton()
+    {
+        var go = TMP_DefaultControls.CreateButton(tmpResources);
+        go.name = "ModelButton";
+        go.GetComponent<RectTransform>().sizeDelta = new Vector2(40f, 40f);
+
+        var text = go.GetComponentInChildren<TextMeshProUGUI>();
+        text.text = "M";
+        text.fontSize = 24f;
+
+        go.GetComponent<Button>().transition = Selectable.Transition.None;
+        var hover = go.AddComponent<UIHoverEffect>();
+        hover.hoverScale = 1.3f;
+        hover.hoverColor = accentColor;
+
+        return SavePrefab<Button>(go);
+    }
+
+    static Button BuildResetViewButton()
+    {
+        var go = TMP_DefaultControls.CreateButton(tmpResources);
+        go.name = "ResetViewButton";
+        go.GetComponent<RectTransform>().sizeDelta = new Vector2(140f, 40f);
+
+        var text = go.GetComponentInChildren<TextMeshProUGUI>();
+        text.text = "Standard";
+        text.fontSize = 22f;
+
+        go.GetComponent<Button>().transition = Selectable.Transition.None;
+        var hover = go.AddComponent<UIHoverEffect>();
+        hover.hoverScale = 1.15f;
+        hover.hoverColor = accentColor;
+
+        return SavePrefab<Button>(go);
+    }
+
+    static Sprite CreateAnchorSprite()
+    {
+        const int size = 128;
+        string path = PrefabFolder + "/Anchor.png";
+
+        var pixels = new Color32[size * size];
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float alpha = AnchorCoverage(x + 0.5f, y + 0.5f);
+                pixels[y * size + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
+            }
+        }
+
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        texture.SetPixels32(pixels);
+        texture.Apply();
+        File.WriteAllBytes(path, texture.EncodeToPNG());
+        Object.DestroyImmediate(texture);
+
+        AssetDatabase.ImportAsset(path);
+        var importer = (TextureImporter)AssetImporter.GetAtPath(path);
+        importer.textureType = TextureImporterType.Sprite;
+        importer.spriteImportMode = SpriteImportMode.Single;
+        importer.alphaIsTransparency = true;
+        importer.mipmapEnabled = false;
+        importer.SaveAndReimport();
+
+        return AssetDatabase.LoadAssetAtPath<Sprite>(path);
+    }
+
+    static float AnchorCoverage(float px, float py)
+    {
+        var p = new Vector2(px, py);
+        float coverage = 0f;
+
+        float ring = Mathf.Abs(Vector2.Distance(p, new Vector2(64f, 108f)) - 11.5f);
+        coverage = Mathf.Max(coverage, Mathf.Clamp01(4.5f - ring));
+
+        coverage = Mathf.Max(coverage, SegmentCoverage(p, new Vector2(64f, 97f), new Vector2(64f, 22f), 4f));
+        coverage = Mathf.Max(coverage, SegmentCoverage(p, new Vector2(42f, 84f), new Vector2(86f, 84f), 3.5f));
+        coverage = Mathf.Max(coverage, SegmentCoverage(p, new Vector2(26f, 56f), new Vector2(14f, 72f), 4f));
+        coverage = Mathf.Max(coverage, SegmentCoverage(p, new Vector2(102f, 56f), new Vector2(114f, 72f), 4f));
+
+        Vector2 fromCenter = p - new Vector2(64f, 56f);
+        if (fromCenter.y <= 4f)
+        {
+            float arc = Mathf.Abs(fromCenter.magnitude - 38f);
+            coverage = Mathf.Max(coverage, Mathf.Clamp01(4.5f - arc));
+        }
+
+        return coverage;
+    }
+
+    static float SegmentCoverage(Vector2 p, Vector2 a, Vector2 b, float halfWidth)
+    {
+        Vector2 ab = b - a;
+        float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude);
+        float distance = Vector2.Distance(p, a + ab * t);
+        return Mathf.Clamp01(halfWidth + 0.5f - distance);
     }
 
     static NamingPopup BuildNamingPopup()
@@ -112,11 +219,77 @@ public static class DecisionTreeSetup
         return SavePrefab<NamingPopup>(panel.gameObject);
     }
 
-    static SourcePickerPopup BuildSourcePicker(Button listItem)
+    static DecisionPopup BuildDecisionPopup()
     {
-        var panel = CreatePanel(null, "SourcePickerPopup", new Vector2(700f, 620f));
+        var panel = CreatePanel(null, "DecisionPopup", new Vector2(880f, 700f));
 
-        var title = CreateText(panel, "Title", "Quelle auswählen", 34f, TextAlignmentOptions.Center);
+        var layout = panel.gameObject.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(30, 30, 20, 20);
+        layout.spacing = 10f;
+        layout.childAlignment = TextAnchor.UpperCenter;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+
+        var title = CreateText(panel, "Title", "Neue Entscheidung", 36f, TextAlignmentOptions.Center);
+        SetHeight(title, 50f);
+
+        var nameField = CreateInputField(panel, "NameField");
+        ((TextMeshProUGUI)nameField.placeholder).text = "Name der Entscheidung...";
+        SetHeight(nameField, 70f);
+
+        var kindLabel = CreateText(panel, "KindLabel", "Grundlage dieser Entscheidung", 24f, TextAlignmentOptions.Left);
+        kindLabel.color = hintColor;
+        SetHeight(kindLabel, 30f);
+
+        var kindRow = CreateRow(panel, "KindRow", 90f);
+        var kindButtons = new Button[ArgumentationInfo.Kinds.Length];
+        for (int i = 0; i < kindButtons.Length; i++)
+        {
+            kindButtons[i] = CreateChoiceButton(kindRow, "Kind" + i, ArgumentationInfo.Name(ArgumentationInfo.Kinds[i]));
+        }
+
+        var beliefLabel = CreateText(panel, "BeliefLabel", "Sicherheit", 24f, TextAlignmentOptions.Left);
+        beliefLabel.color = hintColor;
+        SetHeight(beliefLabel, 30f);
+
+        var beliefRow = CreateRow(panel, "BeliefRow", 80f);
+        var beliefButtons = new Button[ArgumentationInfo.Beliefs.Length];
+        for (int i = 0; i < beliefButtons.Length; i++)
+        {
+            string name = ArgumentationInfo.Name(ArgumentationInfo.Beliefs[i]);
+            beliefButtons[i] = CreateChoiceButton(beliefRow, "Belief" + i, char.ToUpper(name[0]) + name.Substring(1));
+        }
+
+        var reasoningLabel = CreateText(panel, "ReasoningLabel", "Begründung / Methode (optional)", 24f, TextAlignmentOptions.Left);
+        reasoningLabel.color = hintColor;
+        SetHeight(reasoningLabel, 30f);
+
+        var reasoningField = CreateInputField(panel, "ReasoningField");
+        ((TextMeshProUGUI)reasoningField.placeholder).text = "z. B. Stratigrafie, Vergleichsfund...";
+        SetHeight(reasoningField, 70f);
+
+        var buttonRow = CreateRow(panel, "ButtonRow", 70f);
+        var cancel = CreateChoiceButton(buttonRow, "CancelButton", "Abbrechen");
+        var confirm = CreateChoiceButton(buttonRow, "ConfirmButton", "OK");
+
+        var popup = panel.gameObject.AddComponent<DecisionPopup>();
+        popup.nameField = nameField;
+        popup.reasoningField = reasoningField;
+        popup.kindButtons = kindButtons;
+        popup.beliefButtons = beliefButtons;
+        popup.confirmButton = confirm;
+        popup.cancelButton = cancel;
+
+        return SavePrefab<DecisionPopup>(panel.gameObject);
+    }
+
+    static FilePickerPopup BuildFilePicker(string prefabName, string titleText, Button listItem)
+    {
+        var panel = CreatePanel(null, prefabName, new Vector2(700f, 620f));
+
+        var title = CreateText(panel, "Title", titleText, 34f, TextAlignmentOptions.Center);
         Stretch(title.rectTransform, new Vector2(0f, 1f), Vector2.one, new Vector2(20f, -70f), new Vector2(-20f, -10f));
 
         var list = CreateScrollList(panel, "List", 8f);
@@ -129,28 +302,33 @@ public static class DecisionTreeSetup
         var cancel = CreateButton(panel, "CancelButton", "Abbrechen", new Vector2(260f, 70f));
         Place(cancel.GetComponent<RectTransform>(), new Vector2(0.5f, 0f), new Vector2(0f, 15f), new Vector2(260f, 70f), new Vector2(0.5f, 0f));
 
-        var popup = panel.gameObject.AddComponent<SourcePickerPopup>();
+        var popup = panel.gameObject.AddComponent<FilePickerPopup>();
+        popup.titleText = title;
         popup.listContainer = list.content;
         popup.listItemPrefab = listItem;
         popup.emptyHint = hint;
         popup.cancelButton = cancel;
 
-        return SavePrefab<SourcePickerPopup>(panel.gameObject);
+        return SavePrefab<FilePickerPopup>(panel.gameObject);
     }
 
     static SourcesPanel BuildSourcesPanel(Button listItem)
     {
-        var panel = CreatePanel(null, "SourcesPanel", new Vector2(760f, 660f));
+        var panel = CreatePanel(null, "SourcesPanel", new Vector2(760f, 720f));
 
         var title = CreateText(panel, "Title", "Quellen", 34f, TextAlignmentOptions.Center);
         Stretch(title.rectTransform, new Vector2(0f, 1f), Vector2.one, new Vector2(20f, -70f), new Vector2(-20f, -10f));
 
+        var info = CreateText(panel, "Info", "", 22f, TextAlignmentOptions.TopLeft);
+        info.textWrappingMode = TextWrappingModes.Normal;
+        Stretch(info.rectTransform, new Vector2(0f, 1f), Vector2.one, new Vector2(30f, -270f), new Vector2(-30f, -80f));
+
         var list = CreateScrollList(panel, "List", 8f);
-        Stretch((RectTransform)list.transform, Vector2.zero, Vector2.one, new Vector2(20f, 100f), new Vector2(-20f, -80f));
+        Stretch((RectTransform)list.transform, Vector2.zero, Vector2.one, new Vector2(20f, 100f), new Vector2(-20f, -280f));
 
         var hint = CreateText(panel, "EmptyHint", "Noch keine Quellen.\nÜber den Button an der Entscheidung hinzufügen.", 24f, TextAlignmentOptions.Center);
         hint.color = hintColor;
-        Stretch(hint.rectTransform, Vector2.zero, Vector2.one, new Vector2(40f, 120f), new Vector2(-40f, -100f));
+        Stretch(hint.rectTransform, Vector2.zero, Vector2.one, new Vector2(40f, 120f), new Vector2(-40f, -300f));
 
         var close = CreateButton(panel, "CloseButton", "Schließen", new Vector2(260f, 70f));
         Place(close.GetComponent<RectTransform>(), new Vector2(0.5f, 0f), new Vector2(0f, 15f), new Vector2(260f, 70f), new Vector2(0.5f, 0f));
@@ -159,6 +337,8 @@ public static class DecisionTreeSetup
 
         var sources = panel.gameObject.AddComponent<SourcesPanel>();
         sources.titleText = title;
+        sources.infoText = info;
+        sources.listRoot = list.gameObject;
         sources.listContainer = list.content;
         sources.sourceListItemPrefab = listItem;
         sources.emptyHint = hint;
@@ -208,7 +388,8 @@ public static class DecisionTreeSetup
         return viewer;
     }
 
-    static void BuildTreeCanvas(NamingPopup namingPopup, SourcePickerPopup sourcePicker, SourcesPanel sourcesPanel)
+    static void BuildTreeCanvas(Button modelButton, Button resetViewButton, Sprite anchorSprite, NamingPopup namingPopup, DecisionPopup decisionPopup,
+        FilePickerPopup sourcePicker, FilePickerPopup modelPicker, SourcesPanel sourcesPanel)
     {
         var go = new GameObject("TreeCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(TrackedDeviceGraphicRaycaster));
         go.GetComponent<Canvas>().renderMode = RenderMode.WorldSpace;
@@ -224,6 +405,8 @@ public static class DecisionTreeSetup
 
         var createButton = CreateButton(canvasRT, "CreatePromptButton", "+ Baum erstellen", new Vector2(380f, 100f));
         Place(createButton.GetComponent<RectTransform>(), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(380f, 100f));
+
+        var anchor = BuildAnchor(canvasRT, anchorSprite);
 
         var overlay = new GameObject("Overlay", typeof(RectTransform)).GetComponent<RectTransform>();
         overlay.SetParent(canvasRT, false);
@@ -256,6 +439,7 @@ public static class DecisionTreeSetup
         builder.pinView = pin;
         builder.nameView = nameView;
         builder.nameLabel = nameLabel;
+        builder.anchorHandle = anchor;
         builder.canvasRoot = canvasRT;
         builder.content = content;
         builder.overlay = overlay;
@@ -263,8 +447,12 @@ public static class DecisionTreeSetup
         builder.linePrefab = LoadPrefabComponent<Image>("ConnectingLine");
         builder.plusButtonPrefab = LoadPrefabComponent<Button>("NewChildButton");
         builder.addSourceButtonPrefab = LoadPrefabComponent<Button>("SoucreButton");
+        builder.modelButtonPrefab = modelButton;
+        builder.resetViewButtonPrefab = resetViewButton;
         builder.namingPopupPrefab = namingPopup;
+        builder.decisionPopupPrefab = decisionPopup;
         builder.sourcePickerPrefab = sourcePicker;
+        builder.modelPickerPrefab = modelPicker;
         builder.sourcesPanelPrefab = sourcesPanel;
         builder.createPromptButton = createButton.gameObject;
         builder.layout.horizontalSpacing = 380f;
@@ -272,7 +460,39 @@ public static class DecisionTreeSetup
         var follow = go.AddComponent<WorldSpaceCanvasFollow>();
         follow.faceCamera = true;
 
+        var presenter = go.AddComponent<PathModelPresenter>();
+        presenter.builder = builder;
+
         SavePrefab<TreeMenuBuilder>(go);
+    }
+
+    static RectTransform BuildAnchor(RectTransform parent, Sprite anchorSprite)
+    {
+        var go = new GameObject("AnchorHandle", typeof(RectTransform), typeof(Image), typeof(Button), typeof(AnchorHandle));
+        var rt = go.GetComponent<RectTransform>();
+        rt.SetParent(parent, false);
+        Place(rt, Vector2.zero, new Vector2(30f, 30f), new Vector2(100f, 100f), Vector2.zero);
+
+        var background = go.GetComponent<Image>();
+        background.sprite = uiResources.knob;
+        background.color = Color.white;
+        go.GetComponent<Button>().targetGraphic = background;
+
+        var hover = go.AddComponent<UIHoverEffect>();
+        hover.hoverScale = 1.15f;
+        hover.hoverColor = accentColor;
+
+        var icon = new GameObject("Icon", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
+        icon.SetParent(rt, false);
+        Stretch(icon, Vector2.zero, Vector2.one, new Vector2(16f, 16f), new Vector2(-16f, -16f));
+        var iconImage = icon.GetComponent<Image>();
+        iconImage.sprite = anchorSprite;
+        iconImage.color = new Color(0.1f, 0.1f, 0.15f, 1f);
+        iconImage.preserveAspect = true;
+        iconImage.raycastTarget = false;
+
+        go.SetActive(false);
+        return rt;
     }
 
     static RectTransform CreatePanel(RectTransform parent, string name, Vector2 size)
@@ -310,10 +530,47 @@ public static class DecisionTreeSetup
         text.text = label;
         text.fontSize = 28f;
 
+        go.GetComponent<Button>().transition = Selectable.Transition.None;
         var hover = go.AddComponent<UIHoverEffect>();
         hover.hoverScale = 1.08f;
         hover.hoverColor = accentColor;
         return go.GetComponent<Button>();
+    }
+
+    static Button CreateChoiceButton(RectTransform parent, string name, string label)
+    {
+        var button = CreateButton(parent, name, label, new Vector2(100f, 60f));
+        var text = button.GetComponentInChildren<TextMeshProUGUI>();
+        text.enableAutoSizing = true;
+        text.fontSizeMin = 14f;
+        text.fontSizeMax = 24f;
+        text.textWrappingMode = TextWrappingModes.Normal;
+        return button;
+    }
+
+    static RectTransform CreateRow(RectTransform parent, string name, float height)
+    {
+        var go = new GameObject(name, typeof(RectTransform), typeof(HorizontalLayoutGroup));
+        var rt = go.GetComponent<RectTransform>();
+        rt.SetParent(parent, false);
+
+        var row = go.GetComponent<HorizontalLayoutGroup>();
+        row.spacing = 10f;
+        row.childControlWidth = true;
+        row.childControlHeight = true;
+        row.childForceExpandWidth = true;
+        row.childForceExpandHeight = true;
+
+        SetHeight(rt, height);
+        return rt;
+    }
+
+    static void SetHeight(Component target, float height)
+    {
+        var element = target.GetComponent<LayoutElement>();
+        if (element == null) element = target.gameObject.AddComponent<LayoutElement>();
+        element.preferredHeight = height;
+        element.minHeight = height;
     }
 
     static TMP_InputField CreateInputField(RectTransform parent, string name)

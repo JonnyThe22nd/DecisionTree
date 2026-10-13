@@ -300,7 +300,7 @@ MonoBehaviour:
     m_SelectOnDown: {fileID: 0}
     m_SelectOnLeft: {fileID: 0}
     m_SelectOnRight: {fileID: 0}
-  m_Transition: 1
+  m_Transition: 0
   m_Colors:
     m_NormalColor: {r: 1, g: 1, b: 1, a: 1}
     m_HighlightedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
@@ -605,7 +605,8 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9e2e90392f8e57c49ad41690b5310989, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::SourcePickerPopup
+  m_EditorClassIdentifier: Assembly-CSharp::FilePickerPopup
+  titleText: {fileID: 840676692515923093}
   listContainer: {fileID: 4413163432019047407}
   listItemPrefab: {fileID: 815031917620706273, guid: 68b36c9d1ee228948b3513585a57244c, type: 3}
   emptyHint: {fileID: 5051015644396067214}

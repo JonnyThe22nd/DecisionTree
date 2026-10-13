@@ -6,14 +6,11 @@ public class SourceViewer : MonoBehaviour
     public TMPro.TextMeshProUGUI titleText;
 
     [Header("Text")]
-    [Tooltip("Wurzel der Text-Ansicht (ScrollView), wird für Bilder ausgeblendet")]
     public GameObject textRoot;
     public TMPro.TextMeshProUGUI bodyText;
 
     [Header("Bild")]
-    [Tooltip("Bereich, in den das Bild eingepasst wird; wird für Texte ausgeblendet")]
     public RectTransform imageArea;
-    [Tooltip("Kind von imageArea, Anchor und Pivot mittig")]
     public RawImage image;
 
     public Button closeButton;

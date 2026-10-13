@@ -3,10 +3,8 @@ using UnityEngine;
 [System.Serializable]
 public class HierarchicalTreeLayout
 {
-    [Tooltip("Horizontaler Abstand zwischen benachbarten Blatt-Nodes, in Canvas-Einheiten (z.B. Pixel)")]
     public float horizontalSpacing = 220f;
 
-    [Tooltip("Vertikaler Abstand zwischen Ebenen, in Canvas-Einheiten. Negativ = Kinder wachsen nach unten.")]
     public float verticalSpacing = -160f;
 
     float nextX;

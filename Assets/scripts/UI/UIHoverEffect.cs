@@ -4,28 +4,27 @@ using UnityEngine.UI;
 
 public class UIHoverEffect : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
-    [Tooltip("Skalierung beim Hover (1 = keine Änderung)")]
     public float hoverScale = 1.12f;
-    [Tooltip("Farbe des Elements beim Hover")]
     public Color hoverColor = new Color(1f, 0.8f, 0.25f, 1f);
-    [Tooltip("Wird eingefärbt. Leer = Target Graphic des Buttons bzw. die Graphic auf diesem Objekt")]
     public Graphic targetGraphic;
     public float animationSpeed = 14f;
 
     Vector3 baseScale;
     Color baseColor;
     bool hovered;
+    Button button;
     UIHoverEffect parentEffect;
 
     void Awake()
     {
-        var button = GetComponent<Button>();
+        button = GetComponent<Button>();
         if (button != null)
         {
             if (targetGraphic == null) targetGraphic = button.targetGraphic;
             button.transition = Selectable.Transition.None;
         }
         if (targetGraphic == null) targetGraphic = GetComponent<Graphic>();
+        if (targetGraphic != null) targetGraphic.canvasRenderer.SetColor(Color.white);
 
         baseScale = transform.localScale;
         if (targetGraphic != null) baseColor = targetGraphic.color;
@@ -35,6 +34,11 @@ public class UIHoverEffect : MonoBehaviour, IPointerEnterHandler, IPointerExitHa
     {
         if (transform.parent != null)
             parentEffect = transform.parent.GetComponentInParent<UIHoverEffect>();
+    }
+
+    public void SetBaseColor(Color color)
+    {
+        baseColor = color;
     }
 
     public void OnPointerEnter(PointerEventData eventData)
@@ -57,10 +61,11 @@ public class UIHoverEffect : MonoBehaviour, IPointerEnterHandler, IPointerExitHa
     void Update()
     {
         float t = 1f - Mathf.Exp(-animationSpeed * Time.unscaledDeltaTime);
+        bool active = hovered && (button == null || button.IsInteractable());
 
-        transform.localScale = Vector3.Lerp(transform.localScale, hovered ? baseScale * hoverScale : baseScale, t);
+        transform.localScale = Vector3.Lerp(transform.localScale, active ? baseScale * hoverScale : baseScale, t);
         if (targetGraphic != null)
-            targetGraphic.color = Color.Lerp(targetGraphic.color, hovered ? hoverColor : baseColor, t);
+            targetGraphic.color = Color.Lerp(targetGraphic.color, active ? hoverColor : baseColor, t);
     }
 
     void OnDisable()

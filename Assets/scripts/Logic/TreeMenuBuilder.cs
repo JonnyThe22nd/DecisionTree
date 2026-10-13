@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
@@ -15,41 +16,31 @@ public class TreeMenuBuilder : MonoBehaviour
     [Header("Canvas")]
     public RectTransform canvasRoot;
 
-    [Tooltip("Container, der den ganzen Baum hält und skaliert wird. Wird automatisch " +
-             "als Kind von canvasRoot erzeugt, falls hier nichts zugewiesen ist.")]
     public RectTransform content;
 
-    [Tooltip("Container für Popups und das Quellen-Panel. Liegt über dem Baum und wird " +
-             "NICHT mitskaliert, damit Popups auch bei großen Bäumen lesbar bleiben. Wird " +
-             "automatisch als Kind von canvasRoot erzeugt, falls hier nichts zugewiesen ist.")]
     public RectTransform overlay;
 
     [Header("Prefabs")]
-    [Tooltip("WICHTIG: anchorMin/anchorMax NICHT stretchen (z.B. (0.5,0.5))")]
     public Button nodePrefab;
-    [Tooltip("anchorMin = anchorMax = (0.5, 0.5), Pivot = (0, 0.5)")]
     public Image linePrefab;
-    [Tooltip("Kleiner '+'-Button, wird an JEDEN Node angehängt (keine Tiefenbegrenzung)")]
     public Button plusButtonPrefab;
-    [Tooltip("Kleiner 'Quelle hinzufügen'-Button, wird an jede Entscheidung angehängt (nicht an die Top-Node)")]
     public Button addSourceButtonPrefab;
-    [Tooltip("Panel mit TMP_InputField + Bestätigen-Button zum Benennen neuer Nodes")]
+    public Button modelButtonPrefab;
+    public Button resetViewButtonPrefab;
     public NamingPopup namingPopupPrefab;
-    [Tooltip("Popup mit der Dateiliste des Quellen-Ordners")]
-    public SourcePickerPopup sourcePickerPrefab;
-    [Tooltip("Panel mit der Quellenliste einer Entscheidung. Wird EINMALIG instanziert " +
-             "(als Kind von overlay) und für jeden Node wiederverwendet.")]
+    public DecisionPopup decisionPopupPrefab;
+    public FilePickerPopup sourcePickerPrefab;
+    public FilePickerPopup modelPickerPrefab;
     public SourcesPanel sourcesPanelPrefab;
 
     [Header("Erstellung")]
-    [Tooltip("Button (z.B. '+ Baum erstellen'), der sichtbar wird, solange noch kein " +
-             "Baum existiert. Wird von ObjectTreeAttachment ein-/ausgeblendet.")]
     public GameObject createPromptButton;
 
+    [Header("Anker")]
+    public RectTransform anchorHandle;
+
     [Header("Fern-Ansicht")]
-    [Tooltip("Markierung, die aus großer Entfernung statt des Baums gezeigt wird")]
     public RectTransform pinView;
-    [Tooltip("Schild mit dem Namen des Baums für mittlere Entfernung")]
     public RectTransform nameView;
     public TMPro.TextMeshProUGUI nameLabel;
 
@@ -63,20 +54,33 @@ public class TreeMenuBuilder : MonoBehaviour
 
     [Header("Verhalten")]
     public float lineThickness = 4f;
-    [Tooltip("Deckkraft des Baums, solange ein Fenster offen ist und der Baum gesperrt ist")]
     [Range(0f, 1f)]
     public float blockedAlpha = 0.35f;
 
+    static readonly Color attachedModelColor = new Color(0.55f, 0.8f, 1f, 1f);
+
     MenuNode root;
     readonly List<MenuNode> allNodes = new List<MenuNode>();
-    bool popupOpen = false;
+    int popupCount;
     SourcesPanel sourcesPanelInstance;
-
     CanvasGroup contentGroup;
+    CanvasGroup anchorGroup;
+    MenuNode shownModelNode;
+
+    public event Action<PathModelEventArgs> PathModelChanged;
+
+    public string TreeId { get; private set; }
+
+    public bool IsDragging { get; set; }
+
+    public TreeDetailLevel CurrentLevel { get; private set; } = TreeDetailLevel.Full;
 
     public bool HasTree => root != null;
 
     public bool IsCreatePromptVisible => createPromptButton != null && createPromptButton.activeSelf;
+
+    public bool IsWindowOpen =>
+        popupCount > 0 || (sourcesPanelInstance != null && sourcesPanelInstance.gameObject.activeSelf);
 
     void Awake()
     {
@@ -125,33 +129,43 @@ public class TreeMenuBuilder : MonoBehaviour
 
         overlay.SetAsLastSibling();
 
-        if (contentGroup == null)
-        {
-            contentGroup = content.GetComponent<CanvasGroup>();
-            if (contentGroup == null) contentGroup = content.gameObject.AddComponent<CanvasGroup>();
-        }
+        if (contentGroup == null) contentGroup = GetOrAddGroup(content);
+        if (anchorGroup == null && anchorHandle != null) anchorGroup = GetOrAddGroup(anchorHandle);
     }
 
-    public bool IsWindowOpen =>
-        popupOpen || (sourcesPanelInstance != null && sourcesPanelInstance.gameObject.activeSelf);
+    static CanvasGroup GetOrAddGroup(RectTransform target)
+    {
+        var group = target.GetComponent<CanvasGroup>();
+        return group != null ? group : target.gameObject.AddComponent<CanvasGroup>();
+    }
 
     void Update()
     {
         bool blocked = IsWindowOpen;
+        float alpha = blocked ? blockedAlpha : 1f;
+
         contentGroup.interactable = !blocked;
         contentGroup.blocksRaycasts = !blocked;
-        contentGroup.alpha = blocked ? blockedAlpha : 1f;
+        contentGroup.alpha = alpha;
+
+        if (anchorHandle == null) return;
+
+        SetActiveIfChanged(anchorHandle, CurrentLevel == TreeDetailLevel.Full && (HasTree || IsCreatePromptVisible));
+        anchorGroup.interactable = !blocked;
+        anchorGroup.blocksRaycasts = !blocked;
+        anchorGroup.alpha = alpha;
     }
 
     public void SetCreatePromptVisible(bool visible)
     {
-        if (createPromptButton != null && !HasTree && !popupOpen)
+        if (createPromptButton != null && !HasTree && !IsWindowOpen)
             createPromptButton.SetActive(visible);
     }
 
     public void SetDetailLevel(TreeDetailLevel level, float farScale = 1f)
     {
         if (!HasTree) level = TreeDetailLevel.Full;
+        CurrentLevel = level;
 
         SetActiveIfChanged(content, level == TreeDetailLevel.Full);
         SetActiveIfChanged(overlay, level == TreeDetailLevel.Full);
@@ -174,76 +188,340 @@ public class TreeMenuBuilder : MonoBehaviour
             target.gameObject.SetActive(active);
     }
 
+    T OpenPopup<T>(T prefab) where T : Component
+    {
+        popupCount++;
+        return Instantiate(prefab, overlay);
+    }
+
+    void PopupClosed()
+    {
+        popupCount = Mathf.Max(0, popupCount - 1);
+    }
+
+    void EnsureUserName(Action next)
+    {
+        if (UserIdentity.HasName)
+        {
+            next();
+            return;
+        }
+
+        var popup = OpenPopup(namingPopupPrefab);
+        popup.Init(
+            name =>
+            {
+                UserIdentity.Name = name;
+                next();
+            },
+            "Dein Name...",
+            PopupClosed
+        );
+    }
+
     public void PromptCreateRoot()
     {
-        if (HasTree || namingPopupPrefab == null || popupOpen) return;
+        if (HasTree || namingPopupPrefab == null || IsWindowOpen) return;
 
-        popupOpen = true;
         if (createPromptButton != null) createPromptButton.SetActive(false);
 
-        var popup = Instantiate(namingPopupPrefab, overlay);
-        popup.Init(
-            label => CreateRoot(label),
-            "Name des Baums...",
-            () => popupOpen = false
-        );
+        EnsureUserName(() =>
+        {
+            var popup = OpenPopup(namingPopupPrefab);
+            popup.Init(label => CreateRoot(label), "Name des Baums...", PopupClosed);
+        });
+    }
+
+    public void SetTreeId(string id)
+    {
+        if (!string.IsNullOrEmpty(TreeId)) TreeRegistry.Unregister(TreeId, this);
+        TreeId = id;
+        TreeRegistry.Register(id, this);
+    }
+
+    void OnDestroy()
+    {
+        if (!string.IsNullOrEmpty(TreeId)) TreeRegistry.Unregister(TreeId, this);
+    }
+
+    static string NewId()
+    {
+        return Guid.NewGuid().ToString("N").Substring(0, 12);
+    }
+
+    static DateTime ToLocal(long ticks)
+    {
+        return new DateTime(ticks, DateTimeKind.Utc).ToLocalTime();
+    }
+
+    void Submit(TreeOperation op)
+    {
+        op.TreeId = TreeId;
+        if (TreeSync.IsOnline) TreeSync.Instance.Submit(op);
+        else ApplyOperation(op);
+    }
+
+    public MenuNode FindNode(string id)
+    {
+        return allNodes.Find(n => n.Id == id);
     }
 
     public void CreateRoot(string label)
     {
         if (createPromptButton != null) createPromptButton.SetActive(false);
 
-        var newRoot = new MenuNode(label);
-        Build(newRoot);
+        var follow = GetComponent<WorldSpaceCanvasFollow>();
+
+        Submit(new TreeOperation
+        {
+            Type = TreeOperationType.CreateRoot,
+            NodeId = NewId(),
+            Name = label,
+            Author = UserIdentity.Name,
+            Ticks = DateTime.UtcNow.Ticks,
+            Offset = follow != null ? follow.offset : Vector3.zero
+        });
     }
 
-    public void RequestAddChild(MenuNode parent)
+    public void SubmitTreeMove()
     {
-        if (namingPopupPrefab == null || popupOpen) return;
+        var follow = GetComponent<WorldSpaceCanvasFollow>();
+        if (follow == null) return;
 
-        popupOpen = true;
-        var popup = Instantiate(namingPopupPrefab, overlay);
-        popup.Init(
-            label => AddChild(parent, label),
-            "Name der Entscheidung...",
-            () => popupOpen = false
-        );
+        Submit(new TreeOperation { Type = TreeOperationType.MoveTree, Offset = follow.offset });
     }
 
-    public MenuNode AddChild(MenuNode parent, string label)
+    public void ApplyOperation(TreeOperation op)
     {
-        var child = parent.AddChild(label);
+        switch (op.Type)
+        {
+            case TreeOperationType.CreateRoot: ApplyCreateRoot(op); break;
+            case TreeOperationType.AddChild: ApplyAddChild(op); break;
+            case TreeOperationType.AddSource: ApplyAddSource(op); break;
+            case TreeOperationType.AttachModel: ApplyAttachModel(op); break;
+            case TreeOperationType.MoveTree: ApplyMoveTree(op); break;
+        }
+    }
+
+    void ApplyCreateRoot(TreeOperation op)
+    {
+        if (HasTree) return;
+
+        if (createPromptButton != null) createPromptButton.SetActive(false);
+
+        var follow = GetComponent<WorldSpaceCanvasFollow>();
+        if (follow != null && op.Offset != Vector3.zero) follow.offset = op.Offset;
+
+        Build(new MenuNode(op.Name)
+        {
+            Id = op.NodeId,
+            Author = op.Author,
+            CreatedAt = ToLocal(op.Ticks)
+        });
+    }
+
+    void ApplyAddChild(TreeOperation op)
+    {
+        var parent = FindNode(op.ParentId);
+        if (parent == null || FindNode(op.NodeId) != null) return;
+
+        var child = parent.AddChild(op.Name);
+        child.Id = op.NodeId;
+        child.Kind = op.Kind;
+        child.Belief = op.Belief;
+        child.Reasoning = op.Reasoning;
+        child.Author = op.Author;
+        child.CreatedAt = ToLocal(op.Ticks);
+
         CollectAndInstantiate(child);
         Relayout();
-        return child;
     }
 
-    public void RequestAddSource(MenuNode node)
+    void ApplyAddSource(TreeOperation op)
     {
-        if (sourcePickerPrefab == null || popupOpen) return;
+        var node = FindNode(op.NodeId);
+        if (node == null || node.Sources.Exists(s => s.Title == op.FileName)) return;
 
-        popupOpen = true;
-        var popup = Instantiate(sourcePickerPrefab, overlay);
-        popup.Init(
-            path => AddSource(node, path),
-            () => popupOpen = false
-        );
-    }
-
-    public void AddSource(MenuNode node, string filePath)
-    {
-        if (node.Sources.Exists(s => s.FilePath == filePath)) return;
-
-        node.Sources.Add(new SourceEntry { Title = Path.GetFileName(filePath), FilePath = filePath });
+        node.Sources.Add(new SourceEntry
+        {
+            Title = op.FileName,
+            FilePath = SourceLibrary.Resolve(op.FileName),
+            Author = op.Author,
+            AddedAt = ToLocal(op.Ticks)
+        });
 
         if (sourcesPanelInstance != null && sourcesPanelInstance.CurrentNode == node)
             sourcesPanelInstance.RefreshList();
     }
 
+    void ApplyAttachModel(TreeOperation op)
+    {
+        var node = FindNode(op.NodeId);
+        if (node == null) return;
+
+        node.ModelFile = ModelLibrary.Resolve(op.FileName);
+        PaintModelButton(node);
+
+        if (op.Author == UserIdentity.Name) ShowModel(node);
+    }
+
+    void ApplyMoveTree(TreeOperation op)
+    {
+        var follow = GetComponent<WorldSpaceCanvasFollow>();
+        if (follow == null || IsDragging) return;
+
+        follow.offset = op.Offset;
+    }
+
+    public void RequestAddChild(MenuNode parent)
+    {
+        if (namingPopupPrefab == null || decisionPopupPrefab == null || IsWindowOpen) return;
+
+        EnsureUserName(() =>
+        {
+            var popup = OpenPopup(decisionPopupPrefab);
+            popup.Init(data => AddChild(parent, data), PopupClosed);
+        });
+    }
+
+    public void AddChild(MenuNode parent, DecisionData data)
+    {
+        Submit(new TreeOperation
+        {
+            Type = TreeOperationType.AddChild,
+            NodeId = NewId(),
+            ParentId = parent.Id,
+            Name = data.Name,
+            Kind = data.Kind,
+            Belief = data.Belief,
+            Reasoning = data.Reasoning,
+            Author = UserIdentity.Name,
+            Ticks = DateTime.UtcNow.Ticks
+        });
+    }
+
+    public void RequestAddSource(MenuNode node)
+    {
+        if (sourcePickerPrefab == null || IsWindowOpen) return;
+
+        var popup = OpenPopup(sourcePickerPrefab);
+        popup.Init(
+            SourceLibrary.ListFiles(),
+            "Quelle auswählen",
+            "Keine Quellen gefunden. Text- oder Bilddateien hier ablegen:\n" + SourceLibrary.FolderPath,
+            path => AddSource(node, path),
+            PopupClosed
+        );
+    }
+
+    public void AddSource(MenuNode node, string filePath)
+    {
+        string fileName = Path.GetFileName(filePath);
+        if (node.Sources.Exists(s => s.Title == fileName)) return;
+
+        ShareFile(SharedFileKind.Source, fileName);
+        Submit(new TreeOperation
+        {
+            Type = TreeOperationType.AddSource,
+            NodeId = node.Id,
+            FileName = fileName,
+            Author = UserIdentity.Name,
+            Ticks = DateTime.UtcNow.Ticks
+        });
+    }
+
+    static void ShareFile(SharedFileKind kind, string fileName)
+    {
+        if (TreeSync.IsOnline && FileTransfer.Instance != null)
+            FileTransfer.Instance.Share(kind, fileName);
+    }
+
     public void RequestOpenSources(MenuNode node)
     {
-        if (sourcesPanelInstance == null || popupOpen) return;
+        if (sourcesPanelInstance == null || IsWindowOpen) return;
         sourcesPanelInstance.Open(node);
+    }
+
+    public void RequestAttachModel(MenuNode node)
+    {
+        if (modelPickerPrefab == null || IsWindowOpen) return;
+
+        var popup = OpenPopup(modelPickerPrefab);
+        popup.Init(
+            ModelLibrary.ListFiles(),
+            "3D-Modell auswählen",
+            "Keine Modelle gefunden. .glb-Dateien hier ablegen:\n" + ModelLibrary.FolderPath,
+            path => AttachModel(node, path),
+            PopupClosed
+        );
+    }
+
+    public void AttachModel(MenuNode node, string filePath)
+    {
+        string fileName = Path.GetFileName(filePath);
+
+        ShareFile(SharedFileKind.Model, fileName);
+        Submit(new TreeOperation
+        {
+            Type = TreeOperationType.AttachModel,
+            NodeId = node.Id,
+            FileName = fileName,
+            Author = UserIdentity.Name,
+            Ticks = DateTime.UtcNow.Ticks
+        });
+    }
+
+    void OnModelButton(MenuNode node)
+    {
+        if (string.IsNullOrEmpty(node.ModelFile))
+        {
+            RequestAttachModel(node);
+            return;
+        }
+
+        if (shownModelNode == node) HideModel();
+        else ShowModel(node);
+    }
+
+    void ShowModel(MenuNode node)
+    {
+        shownModelNode = node;
+        RaisePathModel(node, true);
+    }
+
+    public void ResetView()
+    {
+        HideModel();
+    }
+
+    void HideModel()
+    {
+        var node = shownModelNode;
+        shownModelNode = null;
+        if (node != null) RaisePathModel(node, false);
+    }
+
+    void RaisePathModel(MenuNode node, bool visible)
+    {
+        PathModelChanged?.Invoke(new PathModelEventArgs
+        {
+            Leaf = node,
+            Path = node.GetPath(),
+            ModelFile = node.ModelFile,
+            Visible = visible
+        });
+    }
+
+    static void PaintModelButton(MenuNode node)
+    {
+        if (node.ModelButtonInstance == null) return;
+
+        Color color = string.IsNullOrEmpty(node.ModelFile) ? Color.white : attachedModelColor;
+        var hover = node.ModelButtonInstance.GetComponent<UIHoverEffect>();
+        if (hover != null) hover.SetBaseColor(color);
+
+        var image = node.ModelButtonInstance.GetComponent<Image>();
+        if (image != null) image.color = color;
     }
 
     public void Build(MenuNode treeRoot)
@@ -259,6 +537,7 @@ public class TreeMenuBuilder : MonoBehaviour
     public void Clear()
     {
         if (content == null) return;
+        HideModel();
         foreach (Transform child in content)
             Destroy(child.gameObject);
         allNodes.Clear();
@@ -287,14 +566,42 @@ public class TreeMenuBuilder : MonoBehaviour
             plus.onClick.AddListener(() => RequestAddChild(node));
         }
 
-        if (addSourceButtonPrefab != null && !node.IsRoot)
+        if (node.IsRoot && resetViewButtonPrefab != null)
         {
-            Button addSource = Instantiate(addSourceButtonPrefab, node.VisualInstance);
-            var addSourceRT = addSource.GetComponent<RectTransform>();
-            addSourceRT.anchorMin = addSourceRT.anchorMax = new Vector2(1f, 0f);
-            addSourceRT.pivot = new Vector2(0f, 0f);
-            addSourceRT.anchoredPosition = new Vector2(10f, 0f);
-            addSource.onClick.AddListener(() => RequestAddSource(node));
+            Button reset = Instantiate(resetViewButtonPrefab, node.VisualInstance);
+            var resetRT = reset.GetComponent<RectTransform>();
+            resetRT.anchorMin = resetRT.anchorMax = new Vector2(0.5f, 0f);
+            resetRT.pivot = new Vector2(0.5f, 1f);
+            resetRT.anchoredPosition = new Vector2(0f, -10f);
+            reset.onClick.AddListener(ResetView);
+        }
+
+        if (!node.IsRoot)
+        {
+            if (addSourceButtonPrefab != null)
+            {
+                Button addSource = Instantiate(addSourceButtonPrefab, node.VisualInstance);
+                var addSourceRT = addSource.GetComponent<RectTransform>();
+                addSourceRT.anchorMin = addSourceRT.anchorMax = new Vector2(1f, 0f);
+                addSourceRT.pivot = new Vector2(0f, 0f);
+                addSourceRT.anchoredPosition = new Vector2(10f, 0f);
+                addSource.onClick.AddListener(() => RequestAddSource(node));
+            }
+
+            if (modelButtonPrefab != null)
+            {
+                Button model = Instantiate(modelButtonPrefab, node.VisualInstance);
+                var modelRT = model.GetComponent<RectTransform>();
+                modelRT.anchorMin = modelRT.anchorMax = new Vector2(0.5f, 0f);
+                modelRT.pivot = new Vector2(0.5f, 1f);
+                modelRT.anchoredPosition = new Vector2(0f, -10f);
+                model.onClick.AddListener(() => OnModelButton(node));
+                node.ModelButtonInstance = modelRT;
+                PaintModelButton(node);
+            }
+
+            AddBadge(node.VisualInstance, "KindBadge", ArgumentationInfo.Letter(node.Kind), ArgumentationInfo.Color(node.Kind), new Vector2(0f, 1f));
+            AddBadge(node.VisualInstance, "BeliefBadge", null, ArgumentationInfo.Color(node.Belief), new Vector2(0f, 0f));
         }
 
         if (node.Parent != null)
@@ -308,11 +615,42 @@ public class TreeMenuBuilder : MonoBehaviour
             CollectAndInstantiate(child);
     }
 
+    static void AddBadge(RectTransform parent, string badgeName, string letter, Color color, Vector2 anchor)
+    {
+        var go = new GameObject(badgeName, typeof(RectTransform), typeof(Image));
+        var rt = go.GetComponent<RectTransform>();
+        rt.SetParent(parent, false);
+        rt.anchorMin = rt.anchorMax = anchor;
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(34f, 34f);
+        rt.anchoredPosition = Vector2.zero;
+
+        var image = go.GetComponent<Image>();
+        image.color = color;
+        image.raycastTarget = false;
+
+        if (letter == null) return;
+
+        var textObject = new GameObject("Letter", typeof(RectTransform), typeof(TMPro.TextMeshProUGUI));
+        var textRT = textObject.GetComponent<RectTransform>();
+        textRT.SetParent(rt, false);
+        textRT.anchorMin = Vector2.zero;
+        textRT.anchorMax = Vector2.one;
+        textRT.offsetMin = textRT.offsetMax = Vector2.zero;
+
+        var text = textObject.GetComponent<TMPro.TextMeshProUGUI>();
+        text.text = letter;
+        text.fontSize = 22f;
+        text.fontStyle = TMPro.FontStyles.Bold;
+        text.alignment = TMPro.TextAlignmentOptions.Center;
+        text.color = Color.black;
+        text.raycastTarget = false;
+    }
+
     void OnNodeSelected(MenuNode node)
     {
         node.OnSelect?.Invoke();
-
-        if (!node.IsRoot) RequestOpenSources(node);
+        RequestOpenSources(node);
     }
 
     void Relayout()
@@ -325,6 +663,8 @@ public class TreeMenuBuilder : MonoBehaviour
             node.VisualInstance.gameObject.SetActive(visible);
             if (node.ConnectionToParent != null)
                 node.ConnectionToParent.gameObject.SetActive(visible);
+            if (node.ModelButtonInstance != null)
+                node.ModelButtonInstance.gameObject.SetActive(node.IsLeaf || !string.IsNullOrEmpty(node.ModelFile));
         }
 
         UpdateConnectionLines();

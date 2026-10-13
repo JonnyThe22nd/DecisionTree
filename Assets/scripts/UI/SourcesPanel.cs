@@ -3,15 +3,13 @@ using UnityEngine.UI;
 
 public class SourcesPanel : MonoBehaviour
 {
-    [Tooltip("Optional -- zeigt den Namen der Entscheidung, deren Quellen gelistet sind")]
     public TMPro.TextMeshProUGUI titleText;
+    public TMPro.TextMeshProUGUI infoText;
 
     [Header("Liste")]
-    [Tooltip("Content-Objekt der ScrollView (mit Vertical Layout Group), in das die Einträge kommen")]
+    public GameObject listRoot;
     public RectTransform listContainer;
-    [Tooltip("Button mit TextMeshProUGUI-Kind, eine Zeile pro Quelle")]
     public Button sourceListItemPrefab;
-    [Tooltip("Optional -- wird angezeigt, solange die Entscheidung keine Quellen hat")]
     public TMPro.TextMeshProUGUI emptyHint;
 
     [Header("Anzeige")]
@@ -51,14 +49,20 @@ public class SourcesPanel : MonoBehaviour
 
         if (node == null) return;
 
-        if (titleText != null) titleText.text = "Quellen: " + node.Label;
-        if (emptyHint != null) emptyHint.gameObject.SetActive(node.Sources.Count == 0);
+        if (titleText != null) titleText.text = (node.IsRoot ? "Baum: " : "Quellen: ") + node.Label;
+        if (infoText != null) infoText.text = ArgumentationInfo.Describe(node);
+        if (listRoot != null) listRoot.SetActive(!node.IsRoot);
+        if (emptyHint != null) emptyHint.gameObject.SetActive(!node.IsRoot && node.Sources.Count == 0);
 
         foreach (var source in node.Sources)
         {
             Button item = Instantiate(sourceListItemPrefab, listContainer);
             var label = item.GetComponentInChildren<TMPro.TextMeshProUGUI>();
-            if (label != null) label.text = source.Title;
+            if (label != null)
+            {
+                string author = string.IsNullOrEmpty(source.Author) ? "unbekannt" : source.Author;
+                label.text = source.Title + "\n<size=60%>von " + author + " · " + source.AddedAt.ToString("dd.MM.yyyy HH:mm") + "</size>";
+            }
 
             var captured = source;
             item.onClick.AddListener(() =>

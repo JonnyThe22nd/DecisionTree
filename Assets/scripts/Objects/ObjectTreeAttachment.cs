@@ -6,23 +6,21 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors;
 public class ObjectTreeAttachment : MonoBehaviour
 {
     [Header("Canvas")]
-    [Tooltip("Prefab mit Canvas + TreeMenuBuilder + WorldSpaceCanvasFollow + Create-Prompt-Button. Wird pro Objekt einmal instanziert.")]
     public GameObject treeCanvasPrefab;
-    [Tooltip("Position der Canvas relativ zum Objekt")]
     public Vector3 canvasOffset = new Vector3(0, 0.3f, 0);
+    public float frontDistance = 0.7f;
+    public float frontHeight = 0.3f;
+
+    [Header("Netzwerk")]
+    public string treeId;
 
     [Header("Entfernung")]
-    [Tooltip("Wird automatisch auf Camera.main gesetzt, falls leer")]
     public Transform playerReference;
-    [Tooltip("Bis zu dieser Entfernung (Meter) ist der ganze Baum zu sehen")]
     public float fullTreeDistance = 3.5f;
-    [Tooltip("Bis zu dieser Entfernung ist nur der Name des Baums zu sehen, dahinter nur die Markierung")]
     public float nameDistance = 8f;
-    [Tooltip("Puffer in Metern, damit die Ansicht an der Grenze nicht hin- und herspringt")]
     public float distanceHysteresis = 0.3f;
 
     [Header("Hover")]
-    [Tooltip("Farbe des Objekts, solange ein Ray darauf zeigt")]
     public Color hoverColor = new Color(1f, 0.8f, 0.25f, 1f);
 
     static readonly int baseColorId = Shader.PropertyToID("_BaseColor");
@@ -58,6 +56,7 @@ public class ObjectTreeAttachment : MonoBehaviour
 
         GameObject canvasInstance = Instantiate(treeCanvasPrefab);
         treeBuilder = canvasInstance.GetComponentInChildren<TreeMenuBuilder>(true);
+        treeBuilder.SetTreeId(string.IsNullOrEmpty(treeId) ? HierarchyPath() : treeId);
 
         var follow = canvasInstance.GetComponentInChildren<WorldSpaceCanvasFollow>(true);
         if (follow != null)
@@ -70,6 +69,14 @@ public class ObjectTreeAttachment : MonoBehaviour
             Debug.LogWarning($"ObjectTreeAttachment auf '{name}': kein WorldSpaceCanvasFollow " +
                 "im treeCanvasPrefab gefunden -- die Canvas bleibt an der im Prefab hinterlegten Position.");
         }
+    }
+
+    string HierarchyPath()
+    {
+        string path = name;
+        for (var t = transform.parent; t != null; t = t.parent)
+            path = t.name + "/" + path;
+        return path;
     }
 
     void Update()
@@ -136,6 +143,32 @@ public class ObjectTreeAttachment : MonoBehaviour
     public void ToggleCreatePrompt()
     {
         if (treeBuilder == null || treeBuilder.HasTree) return;
-        treeBuilder.SetCreatePromptVisible(!treeBuilder.IsCreatePromptVisible);
+
+        bool show = !treeBuilder.IsCreatePromptVisible;
+        if (show) PlaceInFront();
+        treeBuilder.SetCreatePromptVisible(show);
+    }
+
+    void PlaceInFront()
+    {
+        var follow = treeBuilder.GetComponent<WorldSpaceCanvasFollow>();
+        if (follow == null) return;
+
+        var viewer = playerReference != null ? playerReference : (Camera.main != null ? Camera.main.transform : null);
+        Vector3 toViewer = viewer != null ? viewer.position - transform.position : Vector3.back;
+        toViewer.y = 0f;
+        if (toViewer.sqrMagnitude < 0.0001f) toViewer = Vector3.back;
+
+        follow.offset = toViewer.normalized * (HorizontalRadius() + frontDistance) + Vector3.up * frontHeight;
+    }
+
+    float HorizontalRadius()
+    {
+        var all = GetComponentsInChildren<Renderer>();
+        if (all.Length == 0) return 0f;
+
+        Bounds bounds = all[0].bounds;
+        for (int i = 1; i < all.Length; i++) bounds.Encapsulate(all[i].bounds);
+        return Mathf.Max(bounds.extents.x, bounds.extents.z);
     }
 }

@@ -4,12 +4,9 @@ using UnityEngine.UI;
 
 public class NamingPopup : MonoBehaviour
 {
-    [Tooltip("TMP_InputField, in das der Name eingegeben wird")]
     public TMPro.TMP_InputField inputField;
     public Button confirmButton;
-    [Tooltip("Optional -- schließt das Popup ohne Node zu erstellen")]
     public Button cancelButton;
-    [Tooltip("Optional -- zeigt einen Platzhalter-Hinweis wie 'Name eingeben...'")]
     public TMPro.TextMeshProUGUI placeholderText;
 
     Action<string> onConfirm;

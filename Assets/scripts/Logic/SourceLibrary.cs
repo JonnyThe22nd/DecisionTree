@@ -12,6 +12,8 @@ public static class SourceLibrary
 
     public static string FolderPath => Path.Combine(Application.persistentDataPath, FolderName);
 
+    public static string Resolve(string fileName) => Path.Combine(FolderPath, Path.GetFileName(fileName));
+
     public static List<string> ListFiles()
     {
         var result = new List<string>();
